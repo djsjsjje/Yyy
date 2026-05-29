@@ -105,7 +105,7 @@
             Lampa.Filter = function (object) {
                 var filterInstance = new originalFilter(object);
 
-                // Intercept Lampa's native selection changes dynamically
+                // 1. Intercept Lampa's native selection changes dynamically
                 var originalOnSelect = null;
                 Object.defineProperty(filterInstance, 'onSelect', {
                     get: function () {
@@ -139,81 +139,81 @@
                     enumerable: true
                 });
 
-                return filterInstance;
-            };
-            Lampa.Filter.prototype = originalFilter.prototype;
+                // 2. Hook Lampa's native set method DIRECTLY on the filter instance to handle constructor-scoped functions
+                var originalSet = filterInstance.set;
+                filterInstance.set = function (type, select) {
+                    if (type === 'filter' && select && Array.isArray(select)) {
+                        var torrentElements = $('.torrent-item, .torrents__item, .torrent-list .selector, .explorer__file');
+                        
+                        if (torrentElements.length > 0) {
+                            var seasons = {};
+                            var episodes = {};
 
-            // Hook Lampa's native set method to insert our options directly into the selection array
-            var originalSet = Lampa.Filter.prototype.set;
-            Lampa.Filter.prototype.set = function (type, select) {
-                if (type === 'filter' && select && Array.isArray(select)) {
-                    var torrentElements = $('.torrent-item, .torrents__item, .torrent-list .selector, .explorer__file');
-                    
-                    if (torrentElements.length > 0) {
-                        var seasons = {};
-                        var episodes = {};
+                            torrentElements.each(function (index, el) {
+                                var titleText = $(el).find('.torrent-item__title, .torrents__item-title, .explorer__file-title').text() || $(el).text();
+                                if (titleText) {
+                                    var parsed = parseSeasonEpisode(titleText);
+                                    if (parsed.season !== null) seasons[parsed.season] = true;
+                                    if (parsed.episode !== null) episodes[parsed.episode] = true;
+                                }
+                            });
 
-                        torrentElements.each(function (index, el) {
-                            var titleText = $(el).find('.torrent-item__title, .torrents__item-title, .explorer__file-title').text() || $(el).text();
-                            if (titleText) {
-                                var parsed = parseSeasonEpisode(titleText);
-                                if (parsed.season !== null) seasons[parsed.season] = true;
-                                if (parsed.episode !== null) episodes[parsed.episode] = true;
-                            }
-                        });
+                            availableSeasons = Object.keys(seasons).map(Number).sort(function (a, b) { return a - b; });
+                            availableEpisodes = Object.keys(episodes).map(Number).sort(function (a, b) { return a - b; });
 
-                        availableSeasons = Object.keys(seasons).map(Number).sort(function (a, b) { return a - b; });
-                        availableEpisodes = Object.keys(episodes).map(Number).sort(function (a, b) { return a - b; });
-
-                        // Inject native-behaving Season list item
-                        if (availableSeasons.length > 0) {
-                            var hasPluginSeason = select.some(function (item) { return item.stype === 'plugin_season'; });
-                            if (!hasPluginSeason) {
-                                var seasonSubitems = [{ title: 'Any', selected: savedSeasonIndex === 0, index: 0 }];
-                                availableSeasons.forEach(function (s, idx) {
-                                    seasonSubitems.push({
-                                        title: 'Season ' + (s < 10 ? '0' + s : s),
-                                        selected: savedSeasonIndex === idx + 1,
-                                        index: idx + 1
+                            // Inject native-behaving Season list item
+                            if (availableSeasons.length > 0) {
+                                var hasPluginSeason = select.some(function (item) { return item.stype === 'plugin_season'; });
+                                if (!hasPluginSeason) {
+                                    var seasonSubitems = [{ title: 'Any', selected: savedSeasonIndex === 0, index: 0 }];
+                                    availableSeasons.forEach(function (s, idx) {
+                                        seasonSubitems.push({
+                                            title: 'Season ' + (s < 10 ? '0' + s : s),
+                                            selected: savedSeasonIndex === idx + 1,
+                                            index: idx + 1
+                                        });
                                     });
-                                });
 
-                                select.push({
-                                    title: 'Season',
-                                    subtitle: seasonSubitems[savedSeasonIndex].title,
-                                    items: seasonSubitems,
-                                    stype: 'plugin_season'
-                                });
-                            }
-                        }
-
-                        // Inject native-behaving Episode list item
-                        if (availableEpisodes.length > 0) {
-                            var hasPluginEpisode = select.some(function (item) { return item.stype === 'plugin_episode'; });
-                            if (!hasPluginEpisode) {
-                                var episodeSubitems = [{ title: 'Any', selected: savedEpisodeIndex === 0, index: 0 }];
-                                availableEpisodes.forEach(function (e, idx) {
-                                    episodeSubitems.push({
-                                        title: 'Episode ' + (e < 10 ? '0' + e : e),
-                                        selected: savedEpisodeIndex === idx + 1,
-                                        index: idx + 1
+                                    select.push({
+                                        title: 'Season',
+                                        subtitle: seasonSubitems[savedSeasonIndex].title,
+                                        items: seasonSubitems,
+                                        stype: 'plugin_season'
                                     });
-                                });
+                                }
+                            }
 
-                                select.push({
-                                    title: 'Episode',
-                                    subtitle: episodeSubitems[savedEpisodeIndex].title,
-                                    items: episodeSubitems,
-                                    stype: 'plugin_episode'
-                                });
+                            // Inject native-behaving Episode list item
+                            if (availableEpisodes.length > 0) {
+                                var hasPluginEpisode = select.some(function (item) { return item.stype === 'plugin_episode'; });
+                                if (!hasPluginEpisode) {
+                                    var episodeSubitems = [{ title: 'Any', selected: savedEpisodeIndex === 0, index: 0 }];
+                                    availableEpisodes.forEach(function (e, idx) {
+                                        episodeSubitems.push({
+                                            title: 'Episode ' + (e < 10 ? '0' + e : e),
+                                            selected: savedEpisodeIndex === idx + 1,
+                                            index: idx + 1
+                                        });
+                                    });
+
+                                    select.push({
+                                        title: 'Episode',
+                                        subtitle: episodeSubitems[savedEpisodeIndex].title,
+                                        items: episodeSubitems,
+                                        stype: 'plugin_episode'
+                                    });
+                                }
                             }
                         }
                     }
-                }
 
-                // Call original set method, which now contains our newly injected native objects
-                return originalSet.apply(this, arguments);
+                    // Call the original set instance method
+                    return originalSet.apply(this, arguments);
+                };
+
+                return filterInstance;
             };
+            Lampa.Filter.prototype = originalFilter.prototype;
         }
 
         // Live DOM monitoring loop to apply hiding criteria on lazy-loads
