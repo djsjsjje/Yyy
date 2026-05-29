@@ -105,6 +105,227 @@
             Lampa.Filter = function (object) {
                 var filterInstance = new originalFilter(object);
 
+                // Intercept Lampa's native selection changes dynamically
+                var originalOnSelect = null;
+                Object.defineProperty(filterInstance, 'onSelect', {
+                    get: function () {
+                        return function (type, item) {
+                            if (type === 'plugin_season') {
+                                savedSeasonIndex = item.index;
+                                applyDOMFilter();
+                                filterInstance.chosen('plugin_season', [item.title]);
+                            } else if (type === 'plugin_episode') {
+                                savedEpisodeIndex = item.index;
+                                applyDOMFilter();
+                                filterInstance.chosen('plugin_episode', [item.title]);
+                            } else if (item && item.reset) {
+                                savedSeasonIndex = 0;
+                                savedEpisodeIndex = 0;
+                                applyDOMFilter();
+                                filterInstance.chosen('plugin_season', ['Any']);
+                                filterInstance.chosen('plugin_episode', ['Any']);
+                            }
+
+                            // Call the original Lampa handler to preserve standard filters logic
+                            if (originalOnSelect) {
+                                originalOnSelect.call(this, type, item);
+                            }
+                        };
+                    },
+                    set: function (val) {
+                        originalOnSelect = val;
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                // Hook Lampa's native set method DIRECTLY on the filter instance
+                var originalSet = filterInstance.set;
+                filterInstance.set = function (type, select) {
+                    
+                    // Rewrite of the screen-detection logic: check globally active activity or active DOM elements
+                    var isTorrents = false;
+                    if (Lampa.Activity && Lampa.Activity.active && Lampa.Activity.active() && Lampa.Activity.active().component === 'torrents') {
+                        isTorrents = true;
+                    } else if ($('.torrent-item, .torrents__item, .torrent-list, .explorer__file').length > 0) {
+                        isTorrents = true;
+                    }
+
+                    if (isTorrents && type === 'filter' && select && Array.isArray(select)) {
+                        var torrentElements = $('.torrent-item, .torrents__item, .torrent-list .selector, .explorer__file');
+                        
+                        if (torrentElements.length > 0) {
+                            var seasons = {};
+                            var episodes = {};
+
+                            torrentElements.each(function (index, el) {
+                                var titleText = $(el).find('.torrent-item__title, .torrents__item-title, .explorer__file-title').text() || $(el).text();
+                                if (titleText) {
+                                    var parsed = parseSeasonEpisode(titleText);
+                                    if (parsed.season !== null) seasons[parsed.season] = true;
+                                    if (parsed.episode !== null) episodes[parsed.episode] = true;
+                                }
+                            });
+
+                            availableSeasons = Object.keys(seasons).map(Number).sort(function (a, b) { return a - b; });
+                            availableEpisodes = Object.keys(episodes).map(Number).sort(function (a, b) { return a - b; });
+
+                            // Inject native-behaving Season list item
+                            if (availableSeasons.length > 0) {
+                                var hasPluginSeason = select.some(function (item) { return item.stype === 'plugin_season'; });
+                                if (!hasPluginSeason) {
+                                    var seasonSubitems = [{ title: 'Any', selected: savedSeasonIndex === 0, index: 0 }];
+                                    availableSeasons.forEach(function (s, idx) {
+                                        seasonSubitems.push({
+                                            title: 'Season ' + (s < 10 ? '0' + s : s),
+                                            selected: savedSeasonIndex === idx + 1,
+                                            index: idx + 1
+                                        });
+                                    });
+
+                                    select.push({
+                                        title: 'Season',
+                                        subtitle: seasonSubitems[savedSeasonIndex].title,
+                                        items: seasonSubitems,
+                                        stype: 'plugin_season'
+                                    });
+                                }
+                            }
+
+                            // Inject native-behaving Episode list item
+                            if (availableEpisodes.length > 0) {
+                                var hasPluginEpisode = select.some(function (item) { return item.stype === 'plugin_episode'; });
+                                if (!hasPluginEpisode) {
+                                    var episodeSubitems = [{ title: 'Any', selected: savedEpisodeIndex === 0, index: 0 }];
+                                    availableEpisodes.forEach(function (e, idx) {
+                                        episodeSubitems.push({
+                                            title: 'Episode ' + (e < 10 ? '0' + e : e),
+                                            selected: savedEpisodeIndex === idx + 1,
+                                            index: idx + 1
+                                        });
+                                    });
+
+                                    select.push({
+                                        title: 'Episode',
+                                        subtitle: episodeSubitems[savedEpisodeIndex].title,
+                                        items: episodeSubitems,
+                                        stype: 'plugin_episode'
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Call the original set instance method
+                    return originalSet.apply(this, arguments);
+                };
+
+                return filterInstance;
+            };
+            Lampa.Filter.prototype = originalFilter.prototype;
+        }
+
+        // Live DOM monitoring loop to apply hiding criteria on lazy-loads
+        var observer = new MutationObserver(function () {
+            var activeAct = Lampa.Activity && Lampa.Activity.active ? Lampa.Activity.active() : null;
+            var isCurrentlyTorrents = (activeAct && activeAct.component === 'torrents') || $('.torrent-item, .torrents__item, .torrent-list, .explorer__file').length > 0;
+            
+            if (!isCurrentlyTorrents) {
+                savedSeasonIndex = 0;
+                savedEpisodeIndex = 0;
+                availableSeasons = [];
+                availableEpisodes = [];
+                return;
+            }
+
+            if (savedSeasonIndex > 0 || savedEpisodeIndex > 0) {
+                applyDOMFilter();
+            }
+        });
+        
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (window.appready) {
+        startPlugin();
+    } else {
+        Lampa.Listener.follow('app', function (e) {
+            if (e.type === 'ready') {
+                startPlugin();
+            }
+        });
+    }
+})();                    if (xMatch) {
+                        s = parseInt(xMatch[1]);
+                        e = parseInt(xMatch[2]);
+                    } else {
+                        var sSingle = title.match(/S(\d+)/i);
+                        var eSingle = title.match(/E(\d+)/i);
+                        if (sSingle) s = parseInt(sSingle[1]);
+                        if (eSingle) e = parseInt(eSingle[1]);
+                    }
+                }
+            }
+            return { season: s, episode: e };
+        }
+
+        var isFiltering = false;
+
+        // Dom element manipulation to show/hide items matching filters
+        function applyDOMFilter() {
+            if (isFiltering) return;
+            isFiltering = true;
+
+            setTimeout(function () {
+                var torrentElements = $('.torrent-item, .torrents__item, .torrent-list .selector, .explorer__file');
+                
+                torrentElements.each(function (index, el) {
+                    var $el = $(el);
+                    var titleText = $el.find('.torrent-item__title, .torrents__item-title, .explorer__file-title').text() || $el.text();
+                    
+                    if (!titleText) return;
+
+                    var parsed = parseSeasonEpisode(titleText);
+                    var show = true;
+
+                    // Filter by selected season
+                    if (savedSeasonIndex > 0 && availableSeasons.length > 0) {
+                        var targetSeason = availableSeasons[savedSeasonIndex - 1];
+                        if (parsed.season !== targetSeason) {
+                            show = false;
+                        }
+                    }
+
+                    // Filter by selected episode
+                    if (savedEpisodeIndex > 0 && availableEpisodes.length > 0) {
+                        var targetEpisode = availableEpisodes[savedEpisodeIndex - 1];
+                        if (parsed.episode !== targetEpisode) {
+                            show = false;
+                        }
+                    }
+
+                    if (show) {
+                        $el.removeClass('hide-by-plugin').show();
+                    } else {
+                        $el.addClass('hide-by-plugin').hide();
+                    }
+                });
+
+                // Updates TV remote focus map to account for hidden/shown elements
+                if (window.Lampa && Lampa.Controller) {
+                    Lampa.Controller.enable('content');
+                }
+
+                isFiltering = false;
+            }, 50);
+        }
+
+        // Hook Lampa's native Filter Class constructor
+        var originalFilter = Lampa.Filter;
+        if (originalFilter) {
+            Lampa.Filter = function (object) {
+                var filterInstance = new originalFilter(object);
+
                 // 1. Intercept Lampa's native selection changes dynamically
                 var originalOnSelect = null;
                 Object.defineProperty(filterInstance, 'onSelect', {
